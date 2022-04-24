@@ -12,7 +12,7 @@ from sklearn.utils import shuffle
 from numpy import argmax
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Dense, Dropout,Activation,Flatten, Input, MaxPooling1D, Conv1D
-from tensorflow.keras.layers import Bidirectional, LSTM, GRU, Embedding, SpatialDropout1D, BatchNormalization, concatenate
+from tensorflow.keras.layers import Bidirectional, LSTM, GRU, Embedding, SpatialDropout1D, BatchNormalization, Concatenate
 from tensorflow.keras.utils import plot_model
 from sklearn.model_selection import train_test_split
 from keras import backend as K
@@ -45,7 +45,7 @@ seqlist = []
 seqlist2 = []
 labels = []
 labels2 = []
-for i in range(1, 301):
+for i in range(1, 1000):
     if len(df[3][i]) < 122 and len(df[3][i]) > 75: #rna length set to a maximum of 122 for now
         labels.append(0)
         labels.append(1)
@@ -122,7 +122,8 @@ seqlist2 = np.array(seqlist2)
 struclist2 = np.array(struclist2)
 seqlist2, struclist2, input_labels = shuffle(seqlist2, struclist2, input_labels, random_state=0)
 
-split = 400
+split = int(len(input_labels)*.8)
+
 test_labels = input_labels[split:]
 input_labels = input_labels[0:split]
 seqs_train = seqlist2[0:split]
@@ -168,8 +169,8 @@ def OneDimensionModel(input_shape):
                  kernel_regularizer=l1(0.001))(x1)
     x1 = BatchNormalization()(x1)
     x1 = Dropout(.35)(x1)
-    x1 = Flatten()(x1)
-    output1 = Dense(20)(x1)
+    output1 = Flatten()(x1)
+    output1 = Dense(122, activation='relu')(x1)
    # output1 = Dense(3, activation='softmax')(x1)
 
     x2 = Conv1D(filters = 32, kernel_size = 3, padding = 'same', kernel_initializer = 'he_uniform', 
@@ -202,24 +203,74 @@ def OneDimensionModel(input_shape):
                  kernel_regularizer=l1(0.001))(x2)
     x2 = BatchNormalization()(x2)
     x2 = Dropout(.35)(x2)
-    x2 = Flatten()(x2)
-    output2 = Dense(20)(x2)
-    combined = concatenate([output1, output2])
-
-    combined = Dense(16, kernel_initializer= 'he_uniform', activation = 'relu', 
-                kernel_regularizer=l1(0.001))(x2)
+    output2 = Flatten()(x2)
+    output2 = Dense(122, activation='relu')(x2)
+    combined = Concatenate()([output1, output2])
+    combined = Flatten()(combined)
+#    combined = Dense(122, kernel_initializer= 'he_uniform', activation = 'relu', 
+#                kernel_regularizer=l1(0.001))(combined)
     final = Dense(3, activation='sigmoid')(combined)
     model = Model(inputs=[inputA, inputB], outputs=final)
     return model
 
-model = OneDimensionModel(122)
 
+
+
+def GRU_model(input_shape):
+    inputA = Input(shape=(input_shape, 4))
+    inputB = Input(shape=(input_shape, 3))
+    inputs = Concatenate()([inputA, inputB])
+    x1 = Bidirectional(GRU(input_shape, dropout=.3, return_sequences=True, kernel_initializer="orthogonal",))(inputs)
+    x1 = Bidirectional(GRU(input_shape, dropout=.3, return_sequences=True, kernel_initializer="orthogonal",))(x1)
+    x1 = Bidirectional(GRU(input_shape, dropout=.3, return_sequences=False, kernel_initializer="orthogonal",))(x1)
+
+    x1 = Dense(200, activation="relu")(x1)
+    outputs = Dense(3, activation="sigmoid")(x1)
+
+    model = Model([inputA, inputB], outputs)
+    return model   
+
+def LSTM_model_earlyconcat(input_shape): #slightly different processing than late concatenate, but the same feature extraction capability
+    inputA = Input(shape=(input_shape, 4))
+    inputB = Input(shape=(input_shape, 3))
+    inputs = Concatenate()([inputA, inputB])
+    x1 = Bidirectional(LSTM(20, return_sequences=True))(inputs)
+    x1 = Bidirectional(LSTM(20, return_sequences=True))(x1)
+    x1 = Bidirectional(LSTM(20, return_sequences=False))(x1)
+    x1 = Flatten()(x1)
+    x1 = Dense(100, activation='relu')(x1)
+    outputs = Dense(3, activation='sigmoid')(x1)
+    model = Model([inputA, inputB], outputs)
+    return model
+    
+
+def LSTM_model_lateconcat(input_shape):
+
+    inputA = Input(shape=(input_shape, 4))
+    inputB = Input(shape=(input_shape, 3))
+    x1 = Bidirectional(LSTM(20, return_sequences=True))(inputA)
+    x1 = Bidirectional(LSTM(20, return_sequences=True))(x1)
+    x1 = Bidirectional(LSTM(20, return_sequences=False))(x1)
+    x2 = Flatten()(x1)
+    x2 = Dense(100)(x1)
+    x2 = Bidirectional(LSTM(20, return_sequences=True))(inputB)
+    x2 = Bidirectional(LSTM(20, return_sequences=True))(x2)
+    x2 = Bidirectional(LSTM(20, return_sequences=False))(x2)
+    x2 = Flatten()(x2)
+    x2 = Dense(100)(x2)
+    x = Concatenate()([x1, x2])
+    x = Dense(100, activation='relu')(x1)
+    outputs = Dense(3, activation='sigmoid')(x1)
+    model = Model([inputA, inputB], outputs)
+    return model
+
+model = OneDimensionModel(122)
 epochs = 1000
 lrate = 0.001
 decay = lrate / epochs
 sgd = SGD(lr = lrate, momentum = 0.9, decay = decay, nesterov = False)
-model.compile(loss = keras.losses.categorical_crossentropy, optimizer = sgd, metrics = ['accuracy'])
-#model.compile(loss = 'binary_crossentropy', optimizer = sgd, metrics = ['binary_accuracy', keras.metrics.Precision(), keras.metrics.Recall()])
+model.compile(loss = 'binary_crossentropy', optimizer = sgd, metrics = ['accuracy'])
+#model.compile(loss = 'categorical_crossentropy', optimizer = sgd, metrics = ['binary_accuracy', keras.metrics.Precision(), keras.metrics.Recall()])
 model.summary()
     
 #history = model.fit(x=seqs_train, y = input_labels, epochs = epochs, verbose = 1, validation_data=(seqs_test, test_labels), batch_size = 256, shuffle = True)
@@ -231,16 +282,3 @@ history = model.fit(x=[seqs_train, struc_train], y = input_labels, epochs = epoc
 
 
 sys.exit()
-
-def GRU_Model(input_shape):
-    inputs = Input(shape=(122, 4))
-    x1 = Bidirectional(GRU(input_shape, dropout=.3, return_sequences=True, kernel_initializer="orthogonal",))(inputs)
-    x1 = Bidirectional(GRU(input_shape, dropout=.3, return_sequences=True, kernel_initializer="orthogonal",))(inputs)
-    x1 = Bidirectional(GRU(input_shape, dropout=.3, return_sequences=True, kernel_initializer="orthogonal",))(inputs)
-
-    x1 = Dense(200, activation="relu")(hidden)
-    output = Dense(1, activation="softmax")(dout)
-
-    model = Model(inputs, output)
-    return model   
-
